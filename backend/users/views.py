@@ -165,11 +165,25 @@ class AssignMemberToTrainerView(APIView):
             member = User.objects.get(pk=member_id, role='member')
             profile, _ = TrainerProfile.objects.get_or_create(trainer=trainer)
             if action == 'assign':
+                # Remove member from any previous trainer profiles so assignment is clean
+                for prev_tp in member.assigned_trainers.all():
+                    if prev_tp.id != profile.id:
+                        prev_tp.assigned_members.remove(member)
                 profile.assigned_members.add(member)
-                return Response({'message': f'{member.get_full_name()} assigned to {trainer.get_full_name()}'})
+                return Response({
+                    'message': f'{member.get_full_name() or member.username} assigned to {trainer.get_full_name() or trainer.username}',
+                    'trainer_id': trainer.id,
+                    'member_id': member.id,
+                    'action': 'assign'
+                })
             else:
                 profile.assigned_members.remove(member)
-                return Response({'message': f'{member.get_full_name()} unassigned from {trainer.get_full_name()}'})
+                return Response({
+                    'message': f'{member.get_full_name() or member.username} unassigned from {trainer.get_full_name() or trainer.username}',
+                    'trainer_id': trainer.id,
+                    'member_id': member.id,
+                    'action': 'unassign'
+                })
         except User.DoesNotExist:
             return Response({'error': 'User not found'}, status=404)
 

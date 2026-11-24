@@ -5,9 +5,11 @@ from .models import User, TrainerProfile
 
 
 class TrainerProfileSerializer(serializers.ModelSerializer):
+    assigned_members = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
+
     class Meta:
         model = TrainerProfile
-        fields = ['specializations', 'bio', 'experience_years']
+        fields = ['specializations', 'bio', 'experience_years', 'assigned_members']
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -32,7 +34,7 @@ class UserSerializer(serializers.ModelSerializer):
         if obj.role == 'member':
             trainer_profiles = obj.assigned_trainers.all()
             if trainer_profiles.exists():
-                tp = trainer_profiles.first()
+                tp = trainer_profiles.last()
                 return {
                     'id': tp.trainer.id,
                     'name': tp.trainer.get_full_name() or tp.trainer.username,

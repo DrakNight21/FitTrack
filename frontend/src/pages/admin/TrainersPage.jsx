@@ -56,15 +56,25 @@ export const TrainersPage = () => {
     loadData()
   }, [])
 
-  const loadData = async () => {
+  const loadData = async (activeTrainerId = null) => {
     try {
       setLoading(true)
       const [trainersData, membersData] = await Promise.all([
         trainersService.getTrainers(),
         membersService.getMembers(),
       ])
-      setTrainers(Array.isArray(trainersData) ? trainersData : trainersData.results || [])
-      setMembers(Array.isArray(membersData) ? membersData : membersData.results || [])
+      const tList = Array.isArray(trainersData) ? trainersData : trainersData.results || []
+      const mList = Array.isArray(membersData) ? membersData : membersData.results || []
+      setTrainers(tList)
+      setMembers(mList)
+
+      const targetId = activeTrainerId || selectedTrainer?.id
+      if (targetId) {
+        const refreshed = tList.find((t) => t.id === targetId)
+        if (refreshed) {
+          setSelectedTrainer(refreshed)
+        }
+      }
     } catch (err) {
       console.error(err)
       setToast({ type: 'error', message: 'Failed to load trainer records.' })
@@ -147,7 +157,7 @@ export const TrainersPage = () => {
         type: 'success',
         message: isCurrentlyAssigned ? 'Member unassigned.' : 'Member assigned to trainer.',
       })
-      loadData()
+      await loadData(selectedTrainer.id)
     } catch (err) {
       console.error(err)
       setToast({ type: 'error', message: 'Failed to update member assignment.' })
@@ -219,9 +229,8 @@ export const TrainersPage = () => {
                     <div className="flex items-center gap-1.5">
                       <Users className="w-3.5 h-3.5 text-gray-500" />
                       <span>
-                        {
-                          members.filter((m) => m.assigned_trainer?.id === trainer.id).length
-                        }{' '}
+                        {trainer.trainer_profile?.assigned_members?.length ??
+                          members.filter((m) => m.assigned_trainer?.id === trainer.id).length}{' '}
                         Assigned Members
                       </span>
                     </div>
@@ -370,7 +379,9 @@ export const TrainersPage = () => {
 
             <div className="max-h-80 overflow-y-auto divide-y divide-[#21302A] border border-[#21302A] rounded-xl">
               {members.map((member) => {
-                const isAssigned = member.assigned_trainer?.id === selectedTrainer.id
+                const isAssigned =
+                  selectedTrainer.trainer_profile?.assigned_members?.includes(member.id) ||
+                  member.assigned_trainer?.id === selectedTrainer.id
                 return (
                   <div
                     key={member.id}
