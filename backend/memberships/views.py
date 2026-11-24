@@ -28,9 +28,9 @@ class MembershipPlanDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-        instance.is_active = False
-        instance.save()
-        return Response({'message': 'Plan deactivated.'})
+        plan_name = instance.name
+        instance.delete()
+        return Response({'message': f'Pricing plan "{plan_name}" deleted successfully.'}, status=status.HTTP_200_OK)
 
 
 class MembershipListView(generics.ListCreateAPIView):
@@ -63,6 +63,16 @@ class MembershipDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = MembershipSerializer
     permission_classes = [IsAdmin]
     queryset = Membership.objects.all()
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        member_name = instance.member.get_full_name() or instance.member.username
+        plan_name = instance.plan.name if instance.plan else 'Custom Plan'
+        instance.delete()
+        return Response(
+            {'message': f'Subscription of {member_name} ({plan_name}) deleted successfully.'},
+            status=status.HTTP_200_OK
+        )
 
 
 class RenewMembershipView(APIView):

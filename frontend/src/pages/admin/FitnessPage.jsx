@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   TrendingUp,
   Plus,
@@ -8,6 +9,7 @@ import {
   ArrowRight,
   TrendingDown,
   User,
+  AlertCircle,
 } from 'lucide-react'
 import {
   LineChart,
@@ -24,9 +26,12 @@ import { Badge } from '../../components/ui/Badge'
 import { Modal } from '../../components/ui/Modal'
 import { LoadingSpinner } from '../../components/ui/LoadingSpinner'
 import { Toast } from '../../components/ui/Toast'
-import { fitnessService, membersService } from '../../services/gymServices'
+import { useAuth } from '../../context/AuthContext'
+import { fitnessService, membersService, trainersService } from '../../services/gymServices'
 
 export const FitnessPage = () => {
+  const { user, isTrainer } = useAuth()
+  const [searchParams] = useSearchParams()
   const [members, setMembers] = useState([])
   const [selectedMemberId, setSelectedMemberId] = useState('')
   const [records, setRecords] = useState([])
@@ -57,25 +62,48 @@ export const FitnessPage = () => {
   useEffect(() => {
     if (selectedMemberId) {
       loadRecords(selectedMemberId)
+    } else {
+      setRecords([])
     }
   }, [selectedMemberId])
 
   const loadMembers = async () => {
     try {
-      const data = await membersService.getMembers()
-      const memberList = Array.isArray(data) ? data : data.results || []
+      setLoading(true)
+      let memberList = []
+      if (isTrainer || user?.role === 'trainer') {
+        const data = await trainersService.getMyMembers()
+        memberList = Array.isArray(data) ? data : data.results || []
+      } else {
+        const data = await membersService.getMembers()
+        memberList = Array.isArray(data) ? data : data.results || []
+      }
       setMembers(memberList)
-      if (memberList.length > 0) {
+
+      const queryMemberId = searchParams.get('member_id')
+      const found = queryMemberId && memberList.some((m) => String(m.id) === String(queryMemberId))
+
+      if (found) {
+        setSelectedMemberId(Number(queryMemberId))
+      } else if (memberList.length > 0) {
         setSelectedMemberId(memberList[0].id)
+      } else {
+        setSelectedMemberId('')
+        setRecords([])
       }
     } catch (err) {
       console.error(err)
+      setToast({ type: 'error', message: 'Failed to load member roster.' })
     } finally {
       setLoading(false)
     }
   }
 
   const loadRecords = async (memberId) => {
+    if (!memberId) {
+      setRecords([])
+      return
+    }
     try {
       setLoading(true)
       const data = await fitnessService.getRecords({ member_id: memberId })
@@ -90,6 +118,10 @@ export const FitnessPage = () => {
 
   const handleRecordProgress = async (e) => {
     e.preventDefault()
+    if (!selectedMemberId) {
+      setToast({ type: 'error', message: 'Please select an athlete first.' })
+      return
+    }
     setSubmitting(true)
     try {
       await fitnessService.recordProgress({
@@ -107,15 +139,21 @@ export const FitnessPage = () => {
         notes: metricForm.notes,
       })
       setIsAddModalOpen(false)
-      setToast({ type: 'success', message: 'Body measurement recorded.' })
+      setToast({ type: 'success', message: 'Body measurement recorded successfully.' })
       loadRecords(selectedMemberId)
     } catch (err) {
       console.error(err)
-      setToast({ type: 'error', message: 'Failed to log measurement.' })
+      const errDetail =
+        err.response?.data?.detail ||
+        err.response?.data?.error ||
+        'Failed to log measurement.'
+      setToast({ type: 'error', message: errDetail })
     } finally {
       setSubmitting(false)
     }
   }
+
+  const isTrainerRole = isTrainer || user?.role === 'trainer'
 
   // Calculate comparison between latest 2 records
   const latestRecord = records[0] || null
@@ -129,6 +167,32 @@ export const FitnessPage = () => {
 
   const selectedMember = members.find((m) => m.id === Number(selectedMemberId))
 
+  // If trainer has no assigned members, show info state
+  if (!loading && isTrainerRole && members.length === 0) {
+    return (
+      <div className="space-y-6">
+        {toast && (
+          <Toast type={toast.type} message={toast.message} onClose={() => setToast(null)} />
+        )}
+        <div>
+          <h2 className="text-2xl font-extrabold text-white tracking-tight">Athlete Fitness Progression</h2>
+          <p className="text-xs text-gray-400 mt-1">
+            Track body metrics, weight progression, and body composition for your assigned athletes.
+          </p>
+        </div>
+        <div className="flex flex-col items-center justify-center py-20 gap-4">
+          <div className="w-16 h-16 rounded-2xl bg-[#1A2621] flex items-center justify-center">
+            <AlertCircle className="w-8 h-8 text-gray-500" />
+          </div>
+          <p className="text-white font-bold text-lg">No Assigned Athletes</p>
+          <p className="text-gray-400 text-sm text-center max-w-sm">
+            You do not have any assigned athletes yet. The gym admin needs to assign members to your roster before you can track their fitness progress.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       {toast && (
@@ -138,13 +202,22 @@ export const FitnessPage = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-extrabold text-white tracking-tight">Fitness Progression</h2>
+          <h2 className="text-2xl font-extrabold text-white tracking-tight">
+            {isTrainerRole ? 'Athlete Fitness Progression' : 'Fitness Progression'}
+          </h2>
           <p className="text-xs text-gray-400 mt-1">
-            Body composition logs, weight progression curves, and anthropometric tracking.
+            {isTrainerRole
+              ? 'Track body metrics, weight progression, and body composition for your assigned athletes.'
+              : 'Body composition logs, weight progression curves, and anthropometric tracking.'}
           </p>
         </div>
 
-        <Button variant="primary" icon={Plus} onClick={() => setIsAddModalOpen(true)}>
+        <Button
+          variant="primary"
+          icon={Plus}
+          onClick={() => setIsAddModalOpen(true)}
+          disabled={!selectedMemberId}
+        >
           Log New Measurement
         </Button>
       </div>
@@ -156,7 +229,7 @@ export const FitnessPage = () => {
             <User className="w-5 h-5 text-[#B6F23A] shrink-0" />
             <div className="w-full sm:w-80">
               <span className="text-[10px] uppercase font-bold text-gray-400 block mb-0.5">
-                Active Member Profile
+                {isTrainerRole ? 'Select Athlete' : 'Active Member Profile'}
               </span>
               <select
                 value={selectedMemberId}

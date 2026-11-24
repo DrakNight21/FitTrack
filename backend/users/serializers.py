@@ -16,6 +16,7 @@ class UserSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
     trainer_profile = TrainerProfileSerializer(read_only=True)
     assigned_trainer = serializers.SerializerMethodField()
+    date_of_birth = serializers.DateField(required=False, allow_null=True)
 
     class Meta:
         model = User
@@ -26,6 +27,20 @@ class UserSerializer(serializers.ModelSerializer):
             'trainer_profile', 'assigned_trainer'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def to_internal_value(self, data):
+        if isinstance(data, dict):
+            data = data.copy()
+            if data.get('date_of_birth') == '':
+                data['date_of_birth'] = None
+        return super().to_internal_value(data)
+
+    def validate_email(self, value):
+        if value:
+            existing = User.objects.filter(email=value).exclude(pk=self.instance.pk if self.instance else None)
+            if existing.exists():
+                raise serializers.ValidationError("This email is already in use by another account.")
+        return value
 
     def get_full_name(self, obj):
         return obj.get_full_name() or obj.username
@@ -110,17 +125,34 @@ class LoginSerializer(serializers.Serializer):
 
 
 class ProfileUpdateSerializer(serializers.ModelSerializer):
+    date_of_birth = serializers.DateField(required=False, allow_null=True)
+
     class Meta:
         model = User
         fields = ['first_name', 'last_name', 'phone', 'date_of_birth', 'address', 'emergency_contact', 'profile_picture']
 
+    def to_internal_value(self, data):
+        if isinstance(data, dict):
+            data = data.copy()
+            if data.get('date_of_birth') == '':
+                data['date_of_birth'] = None
+        return super().to_internal_value(data)
+
 
 class UserCreateSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, default='fittrack123')
+    date_of_birth = serializers.DateField(required=False, allow_null=True)
 
     class Meta:
         model = User
         fields = ['first_name', 'last_name', 'email', 'phone', 'role', 'password', 'date_of_birth', 'address', 'is_active']
+
+    def to_internal_value(self, data):
+        if isinstance(data, dict):
+            data = data.copy()
+            if data.get('date_of_birth') == '':
+                data['date_of_birth'] = None
+        return super().to_internal_value(data)
 
     def validate_email(self, value):
         if User.objects.filter(email=value).exists():

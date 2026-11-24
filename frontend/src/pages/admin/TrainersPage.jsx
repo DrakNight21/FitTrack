@@ -11,6 +11,9 @@ import {
   CheckCircle,
   X,
   AlertCircle,
+  Trash2,
+  CheckCircle2,
+  XCircle,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
@@ -30,7 +33,9 @@ export const TrainersPage = () => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false)
   const [isEditProfileModalOpen, setIsEditProfileModalOpen] = useState(false)
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [selectedTrainer, setSelectedTrainer] = useState(null)
+  const [trainerToDelete, setTrainerToDelete] = useState(null)
   const [submitting, setSubmitting] = useState(false)
 
   // Add Trainer form
@@ -164,6 +169,53 @@ export const TrainersPage = () => {
     }
   }
 
+  const openDeleteModal = (trainer) => {
+    setTrainerToDelete(trainer)
+    setIsDeleteModalOpen(true)
+  }
+
+  const handleDeleteTrainer = async () => {
+    if (!trainerToDelete) return
+    setSubmitting(true)
+    try {
+      await trainersService.deleteTrainer(trainerToDelete.id)
+      setIsDeleteModalOpen(false)
+      setToast({
+        type: 'success',
+        message: `Trainer ${trainerToDelete.full_name || trainerToDelete.username} deleted successfully.`,
+      })
+      setTrainerToDelete(null)
+      loadData()
+    } catch (err) {
+      console.error(err)
+      setToast({
+        type: 'error',
+        message: err.response?.data?.error || 'Failed to delete trainer.',
+      })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleToggleActiveTrainer = async (trainer) => {
+    const newStatus = !trainer.is_active
+    const actionText = newStatus ? 'activated' : 'deactivated'
+    try {
+      await trainersService.updateTrainer(trainer.id, { is_active: newStatus })
+      setToast({
+        type: 'success',
+        message: `Trainer ${trainer.full_name || trainer.username} has been ${actionText}.`,
+      })
+      loadData()
+    } catch (err) {
+      console.error(err)
+      setToast({
+        type: 'error',
+        message: `Failed to ${newStatus ? 'activate' : 'deactivate'} trainer.`,
+      })
+    }
+  }
+
   return (
     <div className="space-y-6">
       {toast && (
@@ -207,7 +259,9 @@ export const TrainersPage = () => {
                       <p className="text-xs text-gray-400">@{trainer.username}</p>
                     </div>
                   </div>
-                  <Badge variant="success" size="xs">Staff Coach</Badge>
+                  <Badge variant={trainer.is_active ? 'success' : 'danger'} size="xs">
+                    {trainer.is_active ? 'Active Coach' : 'Deactivated'}
+                  </Badge>
                 </div>
 
                 {/* Specializations & Bio */}
@@ -259,8 +313,34 @@ export const TrainersPage = () => {
                   variant="outline"
                   size="sm"
                   onClick={() => openEditProfileModal(trainer)}
+                  title="Edit Qualifications"
                 >
                   <Edit2 className="w-3.5 h-3.5" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={
+                    trainer.is_active
+                      ? 'text-amber-400 border-amber-500/30 hover:bg-amber-500/10'
+                      : 'text-[#B6F23A] border-[#B6F23A]/40 hover:bg-[#B6F23A]/10'
+                  }
+                  onClick={() => handleToggleActiveTrainer(trainer)}
+                  title={trainer.is_active ? 'Deactivate Trainer' : 'Activate Trainer'}
+                >
+                  {trainer.is_active ? (
+                    <XCircle className="w-3.5 h-3.5" />
+                  ) : (
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                  )}
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={() => openDeleteModal(trainer)}
+                  title="Delete Trainer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
                 </Button>
               </div>
             </Card>
@@ -458,6 +538,55 @@ export const TrainersPage = () => {
               </Button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {/* Delete Trainer Confirmation Modal */}
+      {trainerToDelete && (
+        <Modal
+          isOpen={isDeleteModalOpen}
+          onClose={() => {
+            setIsDeleteModalOpen(false)
+            setTrainerToDelete(null)
+          }}
+          title="Delete Trainer"
+          maxWidth="max-w-md"
+        >
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs">
+              <AlertCircle className="w-5 h-5 flex-shrink-0" />
+              <span>
+                This will permanently delete this trainer account and remove their member coaching assignments.
+              </span>
+            </div>
+            <p className="text-sm text-gray-300">
+              Are you sure you want to permanently delete trainer{' '}
+              <strong className="text-white">
+                {trainerToDelete.full_name || trainerToDelete.username}
+              </strong>
+              ? This action cannot be reversed.
+            </p>
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#21302A]">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setIsDeleteModalOpen(false)
+                  setTrainerToDelete(null)
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                loading={submitting}
+                onClick={handleDeleteTrainer}
+              >
+                Confirm Delete
+              </Button>
+            </div>
+          </div>
         </Modal>
       )}
     </div>

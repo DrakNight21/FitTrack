@@ -80,7 +80,10 @@ class ProfileView(generics.RetrieveUpdateAPIView):
 
 
 class UserListView(generics.ListCreateAPIView):
-    permission_classes = [IsAdmin]
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [IsAdminOrTrainer()]
+        return [IsAdmin()]
 
     def get_serializer_class(self):
         if self.request.method == 'POST':
@@ -89,6 +92,8 @@ class UserListView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         qs = User.objects.all().order_by('-created_at')
+        if self.request.user.role == 'trainer':
+            qs = qs.filter(role='member')
         role = self.request.query_params.get('role')
         search = self.request.query_params.get('search')
         is_active = self.request.query_params.get('is_active')
@@ -130,9 +135,11 @@ class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-        instance.is_active = False
-        instance.save()
-        return Response({'message': 'User deactivated.'})
+        if instance.id == request.user.id:
+            return Response({'error': 'You cannot delete your own account.'}, status=status.HTTP_400_BAD_REQUEST)
+        user_name = instance.get_full_name() or instance.username
+        instance.delete()
+        return Response({'message': f'{user_name} deleted successfully.'}, status=status.HTTP_200_OK)
 
 
 class TrainerListView(generics.ListAPIView):
@@ -140,7 +147,11 @@ class TrainerListView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return User.objects.filter(role='trainer', is_active=True).order_by('-created_at')
+        qs = User.objects.filter(role='trainer').order_by('-created_at')
+        is_active = self.request.query_params.get('is_active')
+        if is_active is not None:
+            qs = qs.filter(is_active=is_active.lower() == 'true')
+        return qs
 
 
 class TrainerProfileUpdateView(generics.UpdateAPIView):

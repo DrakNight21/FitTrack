@@ -7,6 +7,7 @@ import {
   Clock,
   Trash2,
   CheckCircle,
+  AlertCircle,
   ChevronDown,
   ChevronUp,
 } from 'lucide-react'
@@ -17,8 +18,10 @@ import { Modal } from '../../components/ui/Modal'
 import { LoadingSpinner } from '../../components/ui/LoadingSpinner'
 import { Toast } from '../../components/ui/Toast'
 import { workoutsService, membersService, trainersService } from '../../services/gymServices'
+import { useAuth } from '../../context/AuthContext'
 
 export const WorkoutsPage = () => {
+  const { user, isTrainer } = useAuth()
   const [plans, setPlans] = useState([])
   const [members, setMembers] = useState([])
   const [trainers, setTrainers] = useState([])
@@ -30,7 +33,9 @@ export const WorkoutsPage = () => {
   const [isAddPlanModalOpen, setIsAddPlanModalOpen] = useState(false)
   const [isAddExerciseModalOpen, setIsAddExerciseModalOpen] = useState(false)
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false)
+  const [isDeletePlanModalOpen, setIsDeletePlanModalOpen] = useState(false)
   const [selectedPlan, setSelectedPlan] = useState(null)
+  const [planToDelete, setPlanToDelete] = useState(null)
   const [selectedDayId, setSelectedDayId] = useState(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -51,23 +56,56 @@ export const WorkoutsPage = () => {
 
   useEffect(() => {
     loadData()
-  }, [])
+  }, [user?.role])
 
-  const loadData = async () => {
+  const loadData = async (activePlanId = null) => {
     try {
       setLoading(true)
-      const [plansData, membersData, trainersData] = await Promise.all([
+      const isCoach = user?.role === 'trainer' || isTrainer
+      const [plansRes, membersRes, trainersRes] = await Promise.allSettled([
         workoutsService.getPlans(),
-        membersService.getMembers(),
+        isCoach ? trainersService.getMyMembers() : membersService.getMembers(),
         trainersService.getTrainers(),
       ])
-      const planList = Array.isArray(plansData) ? plansData : plansData.results || []
+
+      const planList =
+        plansRes.status === 'fulfilled'
+          ? Array.isArray(plansRes.value)
+            ? plansRes.value
+            : plansRes.value.results || []
+          : []
       setPlans(planList)
       if (planList.length > 0 && !expandedPlanId) {
         setExpandedPlanId(planList[0].id)
       }
-      setMembers(Array.isArray(membersData) ? membersData : membersData.results || [])
-      setTrainers(Array.isArray(trainersData) ? trainersData : trainersData.results || [])
+
+      const currentPlanId = activePlanId || selectedPlan?.id
+      if (currentPlanId) {
+        const refreshed = planList.find((p) => p.id === currentPlanId)
+        if (refreshed) {
+          setSelectedPlan(refreshed)
+        }
+      }
+
+      setMembers(
+        membersRes.status === 'fulfilled'
+          ? Array.isArray(membersRes.value)
+            ? membersRes.value
+            : membersRes.value.results || []
+          : []
+      )
+      setTrainers(
+        trainersRes.status === 'fulfilled'
+          ? Array.isArray(trainersRes.value)
+            ? trainersRes.value
+            : trainersRes.value.results || []
+          : []
+      )
+
+      if (plansRes.status === 'rejected') {
+        console.error('Failed to load plans:', plansRes.reason)
+        setToast({ type: 'error', message: 'Failed to load workout plans.' })
+      }
     } catch (err) {
       console.error(err)
       setToast({ type: 'error', message: 'Failed to load workout plans.' })
@@ -83,7 +121,7 @@ export const WorkoutsPage = () => {
       const created = await workoutsService.createPlan({
         name: planForm.name,
         description: planForm.description,
-        trainer: planForm.trainer || null,
+        trainer: isTrainer ? user?.id : planForm.trainer || null,
       })
 
       // Add default weekday splits for the plan
@@ -126,17 +164,112 @@ export const WorkoutsPage = () => {
     }
   }
 
-  const handleToggleAssignMember = async (planId, memberId, isAssigned) => {
+  const handleToggleAssignMember = async (planId, memberId, isCurrentlyAssigned) => {
+    // 1. Optimistic update: flip state immediately for instant feedback
+    setSelectedPlan((prev) => {
+      if (!prev || prev.id !== planId) return prev
+      const prevMembers = prev.assigned_members || []
+      const updatedMembers = isCurrentlyAssigned
+        ? prevMembers.filter((id) => id !== memberId)
+        : [...prevMembers, memberId]
+      return {
+        ...prev,
+        assigned_members: updatedMembers,
+        assigned_member_count: updatedMembers.length,
+      }
+    })
+
+    setPlans((prevPlans) =>
+      prevPlans.map((p) => {
+        if (p.id !== planId) return p
+        const prevMembers = p.assigned_members || []
+        const updatedMembers = isCurrentlyAssigned
+          ? prevMembers.filter((id) => id !== memberId)
+          : [...prevMembers, memberId]
+        return {
+          ...p,
+          assigned_members: updatedMembers,
+          assigned_member_count: updatedMembers.length,
+        }
+      })
+    )
+
     try {
-      await workoutsService.assignPlan(planId, memberId, isAssigned ? 'unassign' : 'assign')
+      const res = await workoutsService.assignPlan(
+        planId,
+        memberId,
+        isCurrentlyAssigned ? 'unassign' : 'assign'
+      )
       setToast({
         type: 'success',
-        message: isAssigned ? 'Workout plan unassigned.' : 'Workout plan assigned to member.',
+        message: isCurrentlyAssigned
+          ? 'Workout plan unassigned.'
+          : 'Workout plan assigned to member.',
       })
+      if (res?.assigned_members) {
+        setSelectedPlan((prev) =>
+          prev ? { ...prev, assigned_members: res.assigned_members } : prev
+        )
+      }
+      await loadData(planId)
+    } catch (err) {
+      console.error(err)
+      // Rollback on error
+      setSelectedPlan((prev) => {
+        if (!prev || prev.id !== planId) return prev
+        const prevMembers = prev.assigned_members || []
+        const rolledBack = isCurrentlyAssigned
+          ? [...prevMembers, memberId]
+          : prevMembers.filter((id) => id !== memberId)
+        return {
+          ...prev,
+          assigned_members: rolledBack,
+          assigned_member_count: rolledBack.length,
+        }
+      })
+      setToast({
+        type: 'error',
+        message: err.response?.data?.error || 'Failed to update plan assignment.',
+      })
+    }
+  }
+
+  const openDeletePlanModal = (plan) => {
+    setPlanToDelete(plan)
+    setIsDeletePlanModalOpen(true)
+  }
+
+  const handleDeletePlan = async () => {
+    if (!planToDelete) return
+    setSubmitting(true)
+    try {
+      await workoutsService.deletePlan(planToDelete.id)
+      setIsDeletePlanModalOpen(false)
+      setToast({
+        type: 'success',
+        message: `Workout plan "${planToDelete.name}" deleted successfully.`,
+      })
+      setPlanToDelete(null)
       loadData()
     } catch (err) {
       console.error(err)
-      setToast({ type: 'error', message: 'Failed to update plan assignment.' })
+      setToast({
+        type: 'error',
+        message: err.response?.data?.error || 'Failed to delete workout plan.',
+      })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleDeleteExercise = async (exerciseId) => {
+    try {
+      await workoutsService.deleteExercise(exerciseId)
+      setToast({ type: 'success', message: 'Exercise removed from routine.' })
+      loadData()
+    } catch (err) {
+      console.error(err)
+      setToast({ type: 'error', message: 'Failed to remove exercise.' })
     }
   }
 
@@ -149,9 +282,13 @@ export const WorkoutsPage = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-extrabold text-white tracking-tight">Workout Programs</h2>
+          <h2 className="text-2xl font-extrabold text-white tracking-tight">
+            {isTrainer ? 'My Workout Programs' : 'Workout Programs'}
+          </h2>
           <p className="text-xs text-gray-400 mt-1">
-            Build structured exercise routines, customize sets and reps, and assign to members.
+            {isTrainer
+              ? 'Your assigned workout routines and personalized training programs for coaching your athletes.'
+              : 'Build structured exercise routines, customize sets and reps, and assign to members.'}
           </p>
         </div>
 
@@ -165,8 +302,16 @@ export const WorkoutsPage = () => {
       ) : plans.length === 0 ? (
         <Card className="p-12 text-center text-gray-400">
           <Dumbbell className="w-12 h-12 text-gray-600 mx-auto mb-3" />
-          <p className="text-base font-bold text-white">No workout programs created yet.</p>
-          <p className="text-xs text-gray-500 mt-1">Design your first routine for members.</p>
+          <p className="text-base font-bold text-white">
+            {isTrainer
+              ? 'No workout programs assigned to you yet.'
+              : 'No workout programs created yet.'}
+          </p>
+          <p className="text-xs text-gray-500 mt-1">
+            {isTrainer
+              ? 'Click "Create Workout Plan" above to design your first routine for your athletes.'
+              : 'Design your first routine for members.'}
+          </p>
         </Card>
       ) : (
         <div className="space-y-6">
@@ -194,7 +339,7 @@ export const WorkoutsPage = () => {
                     )}
                   </div>
 
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
                     <Button
                       variant="secondary"
                       size="sm"
@@ -207,9 +352,19 @@ export const WorkoutsPage = () => {
                       Assign ({plan.assigned_member_count || 0})
                     </Button>
 
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={() => openDeletePlanModal(plan)}
+                      title="Delete Workout Program"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+
                     <button
                       onClick={() => setExpandedPlanId(isExpanded ? null : plan.id)}
                       className="p-2 rounded-lg bg-[#202E29] text-gray-300 hover:text-white transition-colors"
+                      title={isExpanded ? "Collapse Routine" : "Expand Routine"}
                     >
                       {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                     </button>
@@ -249,6 +404,13 @@ export const WorkoutsPage = () => {
                                         {ex.sets} sets × {ex.reps} reps • Rest: {ex.rest_seconds}s
                                       </p>
                                     </div>
+                                    <button
+                                      onClick={() => handleDeleteExercise(ex.id)}
+                                      title="Remove Exercise"
+                                      className="p-1 rounded text-gray-500 hover:text-red-400 transition-colors"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
                                   </div>
                                 ))
                               ) : (
@@ -298,18 +460,25 @@ export const WorkoutsPage = () => {
 
           <div>
             <label className="block text-xs font-semibold text-gray-400 mb-1">Supervising Trainer</label>
-            <select
-              value={planForm.trainer}
-              onChange={(e) => setPlanForm({ ...planForm, trainer: e.target.value })}
-              className="w-full px-3.5 py-2.5 bg-[#111715] border border-[#2A3E36] rounded-xl text-sm text-white focus:outline-none focus:border-[#B6F23A]"
-            >
-              <option value="">-- Optional: Assign Trainer --</option>
-              {trainers.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.full_name}
-                </option>
-              ))}
-            </select>
+            {isTrainer ? (
+              <div className="w-full px-3.5 py-2.5 bg-[#17211D] border border-[#2A3E36] rounded-xl text-sm text-[#B6F23A] font-semibold flex items-center justify-between">
+                <span>{user?.full_name || user?.username}</span>
+                <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">(Assigned to You)</span>
+              </div>
+            ) : (
+              <select
+                value={planForm.trainer}
+                onChange={(e) => setPlanForm({ ...planForm, trainer: e.target.value })}
+                className="w-full px-3.5 py-2.5 bg-[#111715] border border-[#2A3E36] rounded-xl text-sm text-white focus:outline-none focus:border-[#B6F23A]"
+              >
+                <option value="">-- Optional: Assign Trainer --</option>
+                {trainers.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.full_name}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
           <div>
@@ -417,35 +586,91 @@ export const WorkoutsPage = () => {
         >
           <div className="space-y-4">
             <p className="text-xs text-gray-400">
-              Select which gym members should follow this workout routine.
+              {isTrainer
+                ? 'Select which of your assigned athletes should follow this workout routine.'
+                : 'Select which gym members should follow this workout routine.'}
             </p>
 
             <div className="max-h-80 overflow-y-auto divide-y divide-[#21302A] border border-[#21302A] rounded-xl">
-              {members.map((member) => {
-                const isAssigned = selectedPlan.assigned_members?.includes(member.id)
-                return (
-                  <div
-                    key={member.id}
-                    className="p-3 flex items-center justify-between hover:bg-[#111715] transition-colors"
-                  >
-                    <div>
-                      <p className="text-sm font-semibold text-white">{member.full_name}</p>
-                      <p className="text-xs text-gray-400">{member.email}</p>
-                    </div>
-
-                    <button
-                      onClick={() => handleToggleAssignMember(selectedPlan.id, member.id, isAssigned)}
-                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                        isAssigned
-                          ? 'bg-[#B6F23A] text-black'
-                          : 'bg-[#202E29] text-gray-400 hover:text-white'
-                      }`}
+              {members.length === 0 ? (
+                <div className="p-8 text-center text-gray-500 text-xs">
+                  {isTrainer
+                    ? 'You do not have any assigned athletes yet. An admin must assign members to your coaching roster first.'
+                    : 'No members registered in the system.'}
+                </div>
+              ) : (
+                members.map((member) => {
+                  const isAssigned = selectedPlan.assigned_members?.includes(member.id)
+                  return (
+                    <div
+                      key={member.id}
+                      className="p-3 flex items-center justify-between hover:bg-[#111715] transition-colors"
                     >
-                      {isAssigned ? 'Assigned ✓' : '+ Assign'}
-                    </button>
-                  </div>
-                )
-              })}
+                      <div>
+                        <p className="text-sm font-semibold text-white">{member.full_name}</p>
+                        <p className="text-xs text-gray-400">{member.email}</p>
+                      </div>
+
+                      <button
+                        onClick={() => handleToggleAssignMember(selectedPlan.id, member.id, isAssigned)}
+                        className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                          isAssigned
+                            ? 'bg-[#B6F23A] text-black'
+                            : 'bg-[#202E29] text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        {isAssigned ? 'Assigned ✓' : '+ Assign'}
+                      </button>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Delete Workout Plan Modal */}
+      {planToDelete && (
+        <Modal
+          isOpen={isDeletePlanModalOpen}
+          onClose={() => {
+            setIsDeletePlanModalOpen(false)
+            setPlanToDelete(null)
+          }}
+          title="Delete Workout Program"
+          maxWidth="max-w-md"
+        >
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs">
+              <AlertCircle className="w-5 h-5 flex-shrink-0" />
+              <span>
+                This will permanently delete this workout plan and all its configured daily routines and exercises.
+              </span>
+            </div>
+            <p className="text-sm text-gray-300">
+              Are you sure you want to permanently delete{' '}
+              <strong className="text-white">{planToDelete.name}</strong>? This action cannot be undone.
+            </p>
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#21302A]">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setIsDeletePlanModalOpen(false)
+                  setPlanToDelete(null)
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                loading={submitting}
+                onClick={handleDeletePlan}
+              >
+                Confirm Delete
+              </Button>
             </div>
           </div>
         </Modal>

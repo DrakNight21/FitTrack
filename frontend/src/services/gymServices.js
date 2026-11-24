@@ -47,6 +47,10 @@ export const trainersService = {
     const res = await api.put(`/trainers/${id}/profile/`, data)
     return res.data
   },
+  deleteTrainer: async (id) => {
+    const res = await api.delete(`/users/${id}/`)
+    return res.data
+  },
   assignMember: async (trainerId, memberId, action = 'assign') => {
     const res = await api.post(`/trainers/${trainerId}/assign-member/`, { member_id: memberId, action })
     return res.data
@@ -84,6 +88,10 @@ export const membershipsService = {
   },
   renewMembership: async (id) => {
     const res = await api.post(`/memberships/${id}/renew/`)
+    return res.data
+  },
+  deleteMembership: async (id) => {
+    const res = await api.delete(`/memberships/${id}/`)
     return res.data
   },
   getExpiring: async () => {

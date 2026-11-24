@@ -30,12 +30,24 @@ export const TrainerDashboard = () => {
   const loadTrainerData = async () => {
     try {
       setLoading(true)
-      const [membersData, plansData] = await Promise.all([
+      const [membersRes, plansRes] = await Promise.allSettled([
         trainersService.getMyMembers(),
         workoutsService.getPlans(),
       ])
-      setAssignedMembers(Array.isArray(membersData) ? membersData : membersData.results || [])
-      setWorkoutPlans(Array.isArray(plansData) ? plansData : plansData.results || [])
+      const mList =
+        membersRes.status === 'fulfilled'
+          ? Array.isArray(membersRes.value)
+            ? membersRes.value
+            : membersRes.value.results || []
+          : []
+      const pList =
+        plansRes.status === 'fulfilled'
+          ? Array.isArray(plansRes.value)
+            ? plansRes.value
+            : plansRes.value.results || []
+          : []
+      setAssignedMembers(mList)
+      setWorkoutPlans(pList)
     } catch (err) {
       console.error(err)
     } finally {
@@ -145,9 +157,9 @@ export const TrainerDashboard = () => {
                 </div>
 
                 <Link
-                  to="/admin/fitness"
+                  to={`/admin/fitness?member_id=${m.id}`}
                   className="p-2 rounded-lg bg-[#17211D] text-gray-400 hover:text-[#B6F23A] transition-colors"
-                  title="View Fitness Progression"
+                  title={`View Fitness Progression — ${m.full_name}`}
                 >
                   <TrendingUp className="w-4 h-4" />
                 </Link>

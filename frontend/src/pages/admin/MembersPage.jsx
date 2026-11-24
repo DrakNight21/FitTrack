@@ -32,7 +32,9 @@ export const MembersPage = () => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [isViewModalOpen, setIsViewModalOpen] = useState(false)
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [selectedMember, setSelectedMember] = useState(null)
+  const [memberToDelete, setMemberToDelete] = useState(null)
   const [toast, setToast] = useState(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -119,14 +121,26 @@ export const MembersPage = () => {
     e.preventDefault()
     setSubmitting(true)
     try {
-      await membersService.createMember(formData)
+      const payload = {
+        ...formData,
+        date_of_birth: formData.date_of_birth || null,
+      }
+      await membersService.createMember(payload)
       setIsAddModalOpen(false)
       setToast({ type: 'success', message: 'Member enrolled successfully.' })
       fetchMembers()
     } catch (err) {
       console.error(err)
-      const msg = err.response?.data?.email?.[0] || 'Failed to create member.'
-      setToast({ type: 'error', message: msg })
+      const errorData = err.response?.data
+      let errorMsg = 'Failed to create member.'
+      if (typeof errorData === 'object' && errorData !== null) {
+        const firstKey = Object.keys(errorData)[0]
+        if (firstKey) {
+          const val = errorData[firstKey]
+          errorMsg = Array.isArray(val) ? `${firstKey}: ${val[0]}` : `${firstKey}: ${val}`
+        }
+      }
+      setToast({ type: 'error', message: errorMsg })
     } finally {
       setSubmitting(false)
     }
@@ -136,28 +150,81 @@ export const MembersPage = () => {
     e.preventDefault()
     setSubmitting(true)
     try {
-      await membersService.updateMember(selectedMember.id, formData)
+      const payload = {
+        first_name: formData.first_name,
+        last_name: formData.last_name,
+        email: formData.email,
+        phone: formData.phone,
+        address: formData.address,
+        emergency_contact: formData.emergency_contact,
+        is_active: formData.is_active,
+        date_of_birth: formData.date_of_birth || null,
+      }
+      await membersService.updateMember(selectedMember.id, payload)
       setIsEditModalOpen(false)
-      setToast({ type: 'success', message: 'Member updated successfully.' })
+      setToast({ type: 'success', message: 'Member record updated successfully.' })
       fetchMembers()
     } catch (err) {
       console.error(err)
-      setToast({ type: 'error', message: 'Failed to update member.' })
+      const errorData = err.response?.data
+      let errorMsg = 'Failed to update member.'
+      if (typeof errorData === 'object' && errorData !== null) {
+        const firstKey = Object.keys(errorData)[0]
+        if (firstKey) {
+          const val = errorData[firstKey]
+          errorMsg = Array.isArray(val) ? `${firstKey}: ${val[0]}` : `${firstKey}: ${val}`
+        }
+      }
+      setToast({ type: 'error', message: errorMsg })
     } finally {
       setSubmitting(false)
     }
   }
 
-  const handleDelete = async (id, name) => {
-    if (window.confirm(`Are you sure you want to deactivate member ${name}?`)) {
-      try {
-        await membersService.deleteMember(id)
-        setToast({ type: 'success', message: `Member ${name} deactivated.` })
-        fetchMembers()
-      } catch (err) {
-        console.error(err)
-        setToast({ type: 'error', message: 'Failed to deactivate member.' })
-      }
+  const handleToggleActive = async (member) => {
+    const newStatus = !member.is_active
+    const actionText = newStatus ? 'activated' : 'deactivated'
+    try {
+      await membersService.updateMember(member.id, { is_active: newStatus })
+      setToast({
+        type: 'success',
+        message: `Member ${member.full_name || member.username} has been ${actionText}.`,
+      })
+      fetchMembers()
+    } catch (err) {
+      console.error(err)
+      setToast({
+        type: 'error',
+        message: `Failed to ${newStatus ? 'activate' : 'deactivate'} member.`,
+      })
+    }
+  }
+
+  const openDeleteModal = (member) => {
+    setMemberToDelete(member)
+    setIsDeleteModalOpen(true)
+  }
+
+  const handleDeleteMember = async () => {
+    if (!memberToDelete) return
+    setSubmitting(true)
+    try {
+      await membersService.deleteMember(memberToDelete.id)
+      setIsDeleteModalOpen(false)
+      setToast({
+        type: 'success',
+        message: `Member ${memberToDelete.full_name || memberToDelete.username} deleted successfully.`,
+      })
+      setMemberToDelete(null)
+      fetchMembers()
+    } catch (err) {
+      console.error(err)
+      setToast({
+        type: 'error',
+        message: err.response?.data?.error || 'Failed to delete member.',
+      })
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -300,15 +367,36 @@ export const MembersPage = () => {
                       )}
                     </td>
                     <td className="py-4 px-6">
-                      <Badge variant={member.is_active ? 'success' : 'danger'}>
-                        {member.is_active ? 'Active' : 'Deactivated'}
-                      </Badge>
+                      <button
+                        onClick={() => handleToggleActive(member)}
+                        title={member.is_active ? 'Click to deactivate' : 'Click to activate'}
+                        className="cursor-pointer transition-transform active:scale-95 text-left focus:outline-none"
+                      >
+                        <Badge variant={member.is_active ? 'success' : 'danger'}>
+                          {member.is_active ? 'Active' : 'Deactivated'}
+                        </Badge>
+                      </button>
                     </td>
                     <td className="py-4 px-6 text-xs text-gray-400">
                       {new Date(member.created_at).toLocaleDateString()}
                     </td>
                     <td className="py-4 px-6 text-right">
                       <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => handleToggleActive(member)}
+                          title={member.is_active ? 'Deactivate Member' : 'Activate Member'}
+                          className={`p-1.5 rounded-lg transition-colors ${
+                            member.is_active
+                              ? 'bg-[#202E29] text-amber-400 hover:bg-amber-500/20'
+                              : 'bg-[#202E29] text-[#B6F23A] hover:bg-[#B6F23A]/20'
+                          }`}
+                        >
+                          {member.is_active ? (
+                            <XCircle className="w-4 h-4" />
+                          ) : (
+                            <CheckCircle2 className="w-4 h-4" />
+                          )}
+                        </button>
                         <button
                           onClick={() => openViewModal(member)}
                           title="View Profile"
@@ -323,15 +411,13 @@ export const MembersPage = () => {
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
-                        {member.is_active && (
-                          <button
-                            onClick={() => handleDelete(member.id, member.full_name)}
-                            title="Deactivate Member"
-                            className="p-1.5 rounded-lg bg-[#202E29] text-red-400 hover:bg-red-500/20 transition-colors"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
+                        <button
+                          onClick={() => openDeleteModal(member)}
+                          title="Delete Member"
+                          className="p-1.5 rounded-lg bg-[#202E29] text-red-400 hover:bg-red-500/20 transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -465,6 +551,27 @@ export const MembersPage = () => {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
+              <label className="block text-xs font-semibold text-gray-400 mb-1">Email Address</label>
+              <input
+                type="email"
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                className="w-full px-3.5 py-2.5 bg-[#111715] border border-[#2A3E36] rounded-xl text-sm text-white focus:outline-none focus:border-[#B6F23A]"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-400 mb-1">Date of Birth</label>
+              <input
+                type="date"
+                value={formData.date_of_birth || ''}
+                onChange={(e) => setFormData({ ...formData, date_of_birth: e.target.value })}
+                className="w-full px-3.5 py-2.5 bg-[#111715] border border-[#2A3E36] rounded-xl text-sm text-white focus:outline-none focus:border-[#B6F23A]"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
               <label className="block text-xs font-semibold text-gray-400 mb-1">Phone Number</label>
               <input
                 type="tel"
@@ -573,6 +680,55 @@ export const MembersPage = () => {
             <div className="p-3 bg-[#111715] rounded-xl border border-[#21302A] text-xs">
               <span className="text-gray-500 uppercase font-semibold">Residential Address</span>
               <p className="font-bold text-white mt-1">{selectedMember.address || 'None'}</p>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Delete Member Confirmation Modal */}
+      {memberToDelete && (
+        <Modal
+          isOpen={isDeleteModalOpen}
+          onClose={() => {
+            setIsDeleteModalOpen(false)
+            setMemberToDelete(null)
+          }}
+          title="Delete Member"
+          maxWidth="max-w-md"
+        >
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs">
+              <AlertCircle className="w-5 h-5 flex-shrink-0" />
+              <span>
+                This will permanently remove this member along with their memberships, attendance, and fitness history.
+              </span>
+            </div>
+            <p className="text-sm text-gray-300">
+              Are you sure you want to permanently delete member{' '}
+              <strong className="text-white">
+                {memberToDelete.full_name || memberToDelete.username}
+              </strong>
+              ? This action cannot be undone.
+            </p>
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#21302A]">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setIsDeleteModalOpen(false)
+                  setMemberToDelete(null)
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                loading={submitting}
+                onClick={handleDeleteMember}
+              >
+                Confirm Delete
+              </Button>
             </div>
           </div>
         </Modal>

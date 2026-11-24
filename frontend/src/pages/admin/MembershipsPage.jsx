@@ -9,6 +9,7 @@ import {
   Calendar,
   Sparkles,
   Users,
+  Trash2,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
@@ -29,6 +30,10 @@ export const MembershipsPage = () => {
   // Modals
   const [isAddPlanModalOpen, setIsAddPlanModalOpen] = useState(false)
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false)
+  const [isDeletePlanModalOpen, setIsDeletePlanModalOpen] = useState(false)
+  const [planToDelete, setPlanToDelete] = useState(null)
+  const [isDeleteSubModalOpen, setIsDeleteSubModalOpen] = useState(false)
+  const [subToDelete, setSubToDelete] = useState(null)
   const [submitting, setSubmitting] = useState(false)
 
   // Add Plan form
@@ -137,6 +142,62 @@ export const MembershipsPage = () => {
     }
   }
 
+  const openDeletePlanModal = (plan) => {
+    setPlanToDelete(plan)
+    setIsDeletePlanModalOpen(true)
+  }
+
+  const handleDeletePlan = async () => {
+    if (!planToDelete) return
+    setSubmitting(true)
+    try {
+      await membershipsService.deletePlan(planToDelete.id)
+      setIsDeletePlanModalOpen(false)
+      setToast({
+        type: 'success',
+        message: `Pricing plan "${planToDelete.name}" deleted successfully.`,
+      })
+      setPlanToDelete(null)
+      loadAllData()
+    } catch (err) {
+      console.error(err)
+      setToast({
+        type: 'error',
+        message: err.response?.data?.error || 'Failed to delete pricing plan.',
+      })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const openDeleteSubModal = (sub) => {
+    setSubToDelete(sub)
+    setIsDeleteSubModalOpen(true)
+  }
+
+  const handleDeleteSubscription = async () => {
+    if (!subToDelete) return
+    setSubmitting(true)
+    try {
+      await membershipsService.deleteMembership(subToDelete.id)
+      setIsDeleteSubModalOpen(false)
+      setToast({
+        type: 'success',
+        message: `Subscription for ${subToDelete.member_detail?.full_name || 'member'} deleted successfully.`,
+      })
+      setSubToDelete(null)
+      loadAllData()
+    } catch (err) {
+      console.error(err)
+      setToast({
+        type: 'error',
+        message: err.response?.data?.error || 'Failed to delete subscription.',
+      })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       {toast && (
@@ -239,15 +300,24 @@ export const MembershipsPage = () => {
                           </div>
                         </td>
                         <td className="py-4 px-6 text-right">
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            className="text-xs"
-                            onClick={() => handleRenew(sub.id, sub.member_detail?.full_name)}
-                          >
-                            <RefreshCw className="w-3.5 h-3.5 mr-1" />
-                            Renew
-                          </Button>
+                          <div className="flex items-center justify-end gap-2">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              className="text-xs"
+                              onClick={() => handleRenew(sub.id, sub.member_detail?.full_name)}
+                            >
+                              <RefreshCw className="w-3.5 h-3.5 mr-1" />
+                              Renew
+                            </Button>
+                            <button
+                              onClick={() => openDeleteSubModal(sub)}
+                              title="Delete Subscription"
+                              className="p-1.5 rounded-lg bg-[#202E29] text-red-400 hover:bg-red-500/20 transition-colors"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     )
@@ -285,17 +355,25 @@ export const MembershipsPage = () => {
                 </div>
               </div>
 
-              <div className="mt-8 pt-4 border-t border-[#21302A]">
+              <div className="mt-8 pt-4 border-t border-[#21302A] flex items-center gap-2">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="w-full text-xs"
+                  className="flex-1 text-xs"
                   onClick={() => {
                     setAssignForm({ ...assignForm, plan: plan.id })
                     setIsAssignModalOpen(true)
                   }}
                 >
                   Assign to Member
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={() => openDeletePlanModal(plan)}
+                  title="Delete Pricing Plan"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
                 </Button>
               </div>
             </Card>
@@ -437,6 +515,106 @@ export const MembershipsPage = () => {
           </div>
         </form>
       </Modal>
+
+      {/* Delete Pricing Plan Modal */}
+      {planToDelete && (
+        <Modal
+          isOpen={isDeletePlanModalOpen}
+          onClose={() => {
+            setIsDeletePlanModalOpen(false)
+            setPlanToDelete(null)
+          }}
+          title="Delete Pricing Plan"
+          maxWidth="max-w-md"
+        >
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs">
+              <AlertCircle className="w-5 h-5 flex-shrink-0" />
+              <span>
+                This will permanently delete this pricing tier. Existing member subscriptions linked to this plan will remain intact.
+              </span>
+            </div>
+            <p className="text-sm text-gray-300">
+              Are you sure you want to permanently delete{' '}
+              <strong className="text-white">{planToDelete.name}</strong> (₹{planToDelete.price})?
+              This action cannot be undone.
+            </p>
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#21302A]">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setIsDeletePlanModalOpen(false)
+                  setPlanToDelete(null)
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                loading={submitting}
+                onClick={handleDeletePlan}
+              >
+                Confirm Delete
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Delete Subscription Modal */}
+      {subToDelete && (
+        <Modal
+          isOpen={isDeleteSubModalOpen}
+          onClose={() => {
+            setIsDeleteSubModalOpen(false)
+            setSubToDelete(null)
+          }}
+          title="Delete Subscription"
+          maxWidth="max-w-md"
+        >
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs">
+              <AlertCircle className="w-5 h-5 flex-shrink-0" />
+              <span>
+                This will permanently remove this member's subscription record. Payment history linked to this subscription will be retained.
+              </span>
+            </div>
+            <p className="text-sm text-gray-300">
+              Are you sure you want to delete the{' '}
+              <strong className="text-[#B6F23A]">
+                {subToDelete.plan_detail?.name || 'Custom Plan'}
+              </strong>{' '}
+              subscription for{' '}
+              <strong className="text-white">
+                {subToDelete.member_detail?.full_name || `Member #${subToDelete.member}`}
+              </strong>
+              ?
+            </p>
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#21302A]">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setIsDeleteSubModalOpen(false)
+                  setSubToDelete(null)
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                loading={submitting}
+                onClick={handleDeleteSubscription}
+              >
+                Confirm Delete
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
