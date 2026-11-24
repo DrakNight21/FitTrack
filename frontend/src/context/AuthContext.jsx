@@ -5,10 +5,22 @@ const AuthContext = createContext(null)
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(() => {
-    const saved = localStorage.getItem('user')
-    return saved ? JSON.parse(saved) : null
+    try {
+      const saved = localStorage.getItem('user')
+      return saved && saved !== 'undefined' && saved !== 'null' ? JSON.parse(saved) : null
+    } catch {
+      localStorage.removeItem('user')
+      return null
+    }
   })
-  const [token, setToken] = useState(() => localStorage.getItem('access_token'))
+  const [token, setToken] = useState(() => {
+    try {
+      const stored = localStorage.getItem('access_token')
+      return stored && stored !== 'undefined' && stored !== 'null' ? stored : null
+    } catch {
+      return null
+    }
+  })
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -17,8 +29,10 @@ export const AuthProvider = ({ children }) => {
       if (storedToken) {
         try {
           const profile = await authService.getProfile()
-          setUser(profile)
-          localStorage.setItem('user', JSON.stringify(profile))
+          if (profile) {
+            setUser(profile)
+            localStorage.setItem('user', JSON.stringify(profile))
+          }
         } catch (error) {
           console.error('Failed to restore session:', error)
           localStorage.removeItem('access_token')
@@ -69,8 +83,10 @@ export const AuthProvider = ({ children }) => {
   const refreshProfile = async () => {
     try {
       const profile = await authService.getProfile()
-      setUser(profile)
-      localStorage.setItem('user', JSON.stringify(profile))
+      if (profile) {
+        setUser(profile)
+        localStorage.setItem('user', JSON.stringify(profile))
+      }
       return profile
     } catch (e) {
       console.error(e)

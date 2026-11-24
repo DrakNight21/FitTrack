@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { DashboardLayout } from './components/layout/DashboardLayout'
 import { LoadingSpinner } from './components/ui/LoadingSpinner'
+import { ErrorBoundary } from './components/ui/ErrorBoundary'
 
 // Pages
 import { LandingPage } from './pages/LandingPage'
@@ -64,9 +65,10 @@ const DashboardRedirect = () => {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <Routes>
+    <ErrorBoundary>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
           {/* Public Pages */}
           <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<LoginPage />} />
@@ -175,5 +177,6 @@ export default function App() {
         </Routes>
       </BrowserRouter>
     </AuthProvider>
+  </ErrorBoundary>
   )
 }
